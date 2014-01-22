@@ -25,7 +25,7 @@ After that you can use `acts_as_list` method in the model:
 
 ```ruby
 class TodoList < ActiveRecord::Base
-  has_many :todo_items, -> { order("position DESC") }
+  has_many :todo_items, order: :position
 end
     
 class TodoItem < ActiveRecord::Base
@@ -81,9 +81,6 @@ All versions `0.1.5` onwards require Rails 3.0.x and higher.
 
 ## Build Status
 [![Build Status](https://secure.travis-ci.org/swanandp/acts_as_list.png)](https://secure.travis-ci.org/swanandp/acts_as_list)
-
-## Workflow Status
-[![WIP Issues](https://badge.waffle.io/swanandp/acts_as_list.png)](http://waffle.io/swanandp/acts_as_list)
 
 ## Roadmap
 

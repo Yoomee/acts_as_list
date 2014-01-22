@@ -12,12 +12,12 @@ module ActiveRecord
       # Todo list example:
       #
       #   class TodoList < ActiveRecord::Base
-      #     has_many :todo_items, order: "position"
+      #     has_many :todo_items, :order => "position"
       #   end
       #
       #   class TodoItem < ActiveRecord::Base
       #     belongs_to :todo_list
-      #     acts_as_list scope: :todo_list
+      #     acts_as_list :scope => :todo_list
       #   end
       #
       #   todo_list.first.move_to_bottom
@@ -29,51 +29,34 @@ module ActiveRecord
         # * +scope+ - restricts what is to be considered a list. Given a symbol, it'll attach <tt>_id</tt>
         #   (if it hasn't already been added) and use that as the foreign key restriction. It's also possible
         #   to give it an entire string that is interpolated if you need a tighter scope than just a foreign key.
-        #   Example: <tt>acts_as_list scope: 'todo_list_id = #{todo_list_id} AND completed = 0'</tt>
+        #   Example: <tt>acts_as_list :scope => 'todo_list_id = #{todo_list_id} AND completed = 0'</tt>
         # * +top_of_list+ - defines the integer used for the top of the list. Defaults to 1. Use 0 to make the collection
         #   act more like an array in its indexing.
         # * +add_new_at+ - specifies whether objects get added to the :top or :bottom of the list. (default: +bottom+)
         #                   `nil` will result in new items not being added to the list on create
         def acts_as_list(options = {})
-          configuration = { column: "position", scope: "1 = 1", top_of_list: 1, add_new_at: :bottom}
+          configuration = { :column => "position", :scope => "1 = 1", :top_of_list => 1, :add_new_at => :bottom}
           configuration.update(options) if options.is_a?(Hash)
 
           configuration[:scope] = "#{configuration[:scope]}_id".intern if configuration[:scope].is_a?(Symbol) && configuration[:scope].to_s !~ /_id$/
 
           if configuration[:scope].is_a?(Symbol)
-            scope_methods = %(
+            scope_condition_method = %(
               def scope_condition
                 self.class.send(:sanitize_sql_hash_for_conditions, { :#{configuration[:scope].to_s} => send(:#{configuration[:scope].to_s}) })
               end
-
-              def scope_changed?
-                changes.include?(scope_name.to_s)
-              end
             )
           elsif configuration[:scope].is_a?(Array)
-            scope_methods = %(
-              def attrs
-                %w(#{configuration[:scope].join(" ")}).inject({}) do |memo,column|
+            scope_condition_method = %(
+              def scope_condition
+                attrs = %w(#{configuration[:scope].join(" ")}).inject({}) do |memo,column|
                   memo[column.intern] = send(column.intern); memo
                 end
-              end
-
-              def scope_changed?
-                (attrs.keys & changes.keys.map(&:to_sym)).any?
-              end
-
-              def scope_condition
                 self.class.send(:sanitize_sql_hash_for_conditions, attrs)
               end
             )
           else
-            scope_methods = %(
-              def scope_condition
-                "#{configuration[:scope]}"
-              end
-
-              def scope_changed?() false end
-            )
+            scope_condition_method = "def scope_condition() \"#{configuration[:scope]}\" end"
           end
 
           class_eval <<-EOV
@@ -99,7 +82,7 @@ module ActiveRecord
               '#{configuration[:add_new_at]}'
             end
 
-            #{scope_methods}
+            #{scope_condition_method}
 
             # only add to attr_accessible
             # if the class has some mass_assignment_protection
@@ -306,7 +289,7 @@ module ActiveRecord
           # Returns the bottom item
           def bottom_item(except = nil)
             conditions = scope_condition
-            conditions = "#{conditions} AND #{self.class.primary_key} != '#{except.id}'" if except
+            conditions = "#{conditions} AND #{self.class.primary_key} != #{except.id}" if except
             acts_as_list_class.unscoped.in_list.where(conditions).order("#{acts_as_list_class.table_name}.#{position_column} DESC").first
           end
 
@@ -371,7 +354,7 @@ module ActiveRecord
           # Reorders intermediate items to support moving an item from old_position to new_position.
           def shuffle_positions_on_intermediate_items(old_position, new_position, avoid_id = nil)
             return if old_position == new_position
-            avoid_id_condition = avoid_id ? " AND #{self.class.primary_key} != '#{avoid_id}'" : ''
+            avoid_id_condition = avoid_id ? " AND #{self.class.primary_key} != #{avoid_id}" : ''
             if old_position < new_position
               # Decrement position of intermediate items
               #
@@ -423,17 +406,14 @@ module ActiveRecord
             shuffle_positions_on_intermediate_items old_position, new_position, id
           end
 
-          # Temporarily swap changes attributes with current attributes
-          def swap_changed_attributes
-            @changed_attributes.each { |k, _| @changed_attributes[k], self[k] =
-              self[k], @changed_attributes[k] }
-          end
-
           def check_scope
-            if scope_changed?
-              swap_changed_attributes
-              send('decrement_positions_on_lower_items') if lower_item
-              swap_changed_attributes
+            if changes.include?("#{scope_name}")
+              old_scope_id = changes["#{scope_name}"].first
+              new_scope_id = changes["#{scope_name}"].last
+              self["#{scope_name}"] = old_scope_id
+              send("decrement_positions_on_lower_items")
+              self["#{scope_name}"] = new_scope_id
+              send("#{position_column}=", nil)
               send("add_to_list_#{add_new_at}")
             end
           end
